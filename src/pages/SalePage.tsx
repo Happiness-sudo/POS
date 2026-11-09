@@ -95,7 +95,7 @@ export default function SalePage({ onLogout, onComplete }: SalePageProps) {
 
   if (showHeldSales) return <HeldSalesPage sales={heldSales} onBack={() => setShowHeldSales(false)} onLogout={onLogout} onResume={resumeHeldSale} onDelete={id => setHeldSales(current => current.filter(sale => sale.id !== id))}/>;
   if (showSalesHistory) return <SalesHistoryPage sales={sales} onBack={() => setShowSalesHistory(false)} onLogout={onLogout}/>;
-  if (showAdmin) return <AdminPage onBack={() => setShowAdmin(false)} onLogout={onLogout}/>;
+  if (showAdmin) return <AdminPage onBack={() => { try { const saved = localStorage.getItem('pos-products'); if (saved) setInventory(JSON.parse(saved) as Product[]); } catch { /* retain the current inventory */ } setShowAdmin(false); }} onLogout={onLogout}/>;
   return <div className="app-shell"><TopBar heldCount={heldSales.length} onHeldSales={() => setShowHeldSales(true)} onSalesHistory={() => setShowSalesHistory(true)} onAdmin={() => setShowAdmin(true)} onLogout={onLogout}/><main className="sale-layout">
     <ProductPanel filtered={filtered} category={category} search={search} selected={selected} searchRef={searchRef} onCategory={value => { setCategory(value); focusSearch(); }} onSearch={setSearch} onSearchKey={handleSearchKey} onAdd={addProduct} onClearSearch={() => { setSearch(''); focusSearch(); setScanMode(false); }} onScanBarcode={() => { setScanMode(true); setSearch(''); focusSearch(); notify('Ready to scan barcode'); }}/>
     <CartPanel cart={cart} selected={selected} subtotal={subtotal} discount={discount} total={total} onSelect={setSelected} onQuantity={changeQuantity} onRemove={removeProduct} onDiscount={() => setDiscountOpen(true)} onHold={holdSale} onClear={clearSale} onPay={startPayment}/>

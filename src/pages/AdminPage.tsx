@@ -36,7 +36,7 @@ export default function AdminPage({ onBack, onLogout }: Props) {
   const nav: { label: Section; icon: typeof LayoutDashboard }[] = [
     { label: 'Dashboard', icon: LayoutDashboard }, { label: 'Products', icon: Boxes }, { label: 'Reports', icon: BarChart3 }, { label: 'Staff', icon: Users }, { label: 'Settings', icon: SettingsIcon },
   ];
-  return <div className="admin-shell"><aside className="admin-sidebar"><strong className="admin-shop-name">{shopSettings.shopName || '[SHOP NAME]'}</strong><nav>{nav.map(({ label, icon: Icon }) => <button key={label} className={section === label ? 'active' : ''} onClick={() => setSection(label)}><Icon size={17}/>{label}</button>)}</nav><button className="admin-back" onClick={onBack}><ShoppingCart size={16}/>Back to sale</button></aside>
+  return <div className="admin-shell"><aside className="admin-sidebar"><strong className="admin-shop-name">{shopSettings.shopName || '[SHOP NAME]'}</strong><nav>{nav.map(({ label, icon: Icon }) => <button key={label} className={section === label || (section === 'End of day' && label === 'Reports') ? 'active' : ''} onClick={() => setSection(label)}><Icon size={17}/>{label}</button>)}</nav><button className="admin-back" onClick={onBack}><ShoppingCart size={16}/>Back to sale</button></aside>
     <main className="admin-main"><header className="admin-mobile-head"><strong>{shopSettings.shopName || '[SHOP NAME]'}</strong><button onClick={onBack}>Back to sale</button></header>
       {section === 'Dashboard' && <Dashboard sales={itemsToday} total={grossToday} transactions={transactionsToday} lowStock={lowStock} onProducts={() => setSection('Products')}/>}
       {section === 'Products' && <ProductsPage products={inventory} onSave={updateInventory} notify={notify}/>}
