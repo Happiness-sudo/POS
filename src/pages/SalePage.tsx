@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { CartItem, PaymentMethod, Product, Sale } from '../types';
 import { categoryMap } from '../data/products';
-import { createSale, listProducts, listSales } from '../api';
+import { createSale, deleteHeldSale, listHeldSales, listProducts, listSales, saveHeldSale } from '../api';
 import TopBar from '../components/TopBar';
 import ProductPanel from '../components/ProductPanel';
 import CartPanel from '../components/CartPanel';
@@ -27,10 +27,7 @@ export default function SalePage({ onLogout, onComplete }: SalePageProps) {
   const [tendered, setTendered] = useState('');
   const [reference, setReference] = useState('');
   const [scanMode, setScanMode] = useState(false);
-  const [heldSales, setHeldSales] = useState<HeldSale[]>([
-    { id: -1, label: '[LABEL: Lady in red]', heldAt: '10:42', items: [{ productId: 1, name: 'Sample item', unitPrice: 160, quantity: 4 }], discount: 0, total: 640 },
-    { id: -2, label: '[LABEL]', heldAt: '11:05', items: [{ productId: 2, name: 'Sample item', unitPrice: 105, quantity: 2 }], discount: 0, total: 210 },
-  ]);
+  const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
   const [showHeldSales, setShowHeldSales] = useState(false);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -48,7 +45,8 @@ export default function SalePage({ onLogout, onComplete }: SalePageProps) {
   useEffect(() => { focusSearch(); }, []);
   const refreshInventory = () => { listProducts().then(setInventory).catch(error => notify(error instanceof Error ? error.message : 'Could not load products')); };
   const refreshSales = () => { listSales().then(setSales).catch(error => notify(error instanceof Error ? error.message : 'Could not load sales history')); };
-  useEffect(() => { refreshInventory(); refreshSales(); }, []);
+  const refreshHeld = () => { listHeldSales().then(setHeldSales).catch(error => notify(error instanceof Error ? error.message : 'Could not load held sales')); };
+  useEffect(() => { refreshInventory(); refreshSales(); refreshHeld(); }, []);
   const submittingRef = useRef(false);
   const addProduct = (product?: Product) => {
     if (!product) { notify('No matching product found'); focusSearch(); return; }
@@ -59,8 +57,21 @@ export default function SalePage({ onLogout, onComplete }: SalePageProps) {
   const removeProduct = (id: number) => { setCart(current => current.filter(item => item.productId !== id)); setSelected(null); focusSearch(); };
   const changeQuantity = (id: number, delta: number) => { setCart(current => current.map(item => item.productId === id ? { ...item, quantity: item.quantity + delta } : item).filter(item => item.quantity > 0)); setSelected(id); focusSearch(); };
   const clearSale = () => { setCart([]); setDiscount(0); setSelected(null); setSearch(''); focusSearch(); };
-  const holdSale = () => { if (!cart.length) return; const now = new Date(); setHeldSales(current => [{ id: now.getTime(), label: '', heldAt: now.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false }), items: cart, discount, total }, ...current]); clearSale(); notify('Sale held'); };
-  const resumeHeldSale = (sale: HeldSale) => { setCart(sale.items); setDiscount(sale.discount); setHeldSales(current => current.filter(item => item.id !== sale.id)); setShowHeldSales(false); };
+  const holdSale = async () => {
+    if (!cart.length) return;
+    const now = new Date();
+    try {
+      const held = await saveHeldSale({ label: '', heldAt: now.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false }), items: cart, discount, total });
+      setHeldSales(current => [held, ...current]);
+      clearSale(); notify('Sale held');
+    } catch (error) { notify(error instanceof Error ? error.message : 'Could not hold the sale'); }
+  };
+  const resumeHeldSale = async (sale: HeldSale) => {
+    try { await deleteHeldSale(sale.id); } catch (error) { notify(error instanceof Error ? error.message : 'Could not resume the sale'); return; }
+    setCart(sale.items); setDiscount(sale.discount);
+    setHeldSales(current => current.filter(item => item.id !== sale.id));
+    setShowHeldSales(false);
+  };
   const startPayment = () => { if (!cart.length) return; setMethod('cash'); setTendered(String(total)); setReference(''); setPaymentOpen(true); };
   const completePayment = async () => {
     if (method === 'cash' && received < total) { notify('Amount received is less than the total'); return; }
@@ -100,7 +111,7 @@ export default function SalePage({ onLogout, onComplete }: SalePageProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [paymentOpen, discountOpen, selected, cart, total, method, tendered, reference]);
 
-  if (showHeldSales) return <HeldSalesPage sales={heldSales} onBack={() => setShowHeldSales(false)} onLogout={onLogout} onResume={resumeHeldSale} onDelete={id => setHeldSales(current => current.filter(sale => sale.id !== id))}/>;
+  if (showHeldSales) return <HeldSalesPage sales={heldSales} onBack={() => setShowHeldSales(false)} onLogout={onLogout} onResume={resumeHeldSale} onDelete={id => { deleteHeldSale(id).then(() => setHeldSales(current => current.filter(sale => sale.id !== id))).catch(error => notify(error instanceof Error ? error.message : 'Could not delete the held sale')); }}/>;
   if (showSalesHistory) return <SalesHistoryPage sales={sales} onBack={() => setShowSalesHistory(false)} onLogout={onLogout}/>;
   if (showAdmin) return <AdminPage onBack={() => { refreshInventory(); setShowAdmin(false); }} onLogout={onLogout}/>;
   return <div className="app-shell"><TopBar heldCount={heldSales.length} onHeldSales={() => setShowHeldSales(true)} onSalesHistory={() => setShowSalesHistory(true)} onAdmin={() => setShowAdmin(true)} onLogout={onLogout}/><main className="sale-layout">

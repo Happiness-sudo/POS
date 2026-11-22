@@ -1,4 +1,5 @@
 import type { CartItem, PaymentMethod, Product, Sale, User } from './types';
+import type { HeldSale } from './pages/HeldSalesPage';
 
 const BASE = '/api';
 const TOKEN_KEY = 'pos-token';
@@ -64,6 +65,9 @@ const toSale = (s: ApiSale): Sale => ({
   createdAt: s.created_at.replace(' ', 'T'),
 });
 
+interface ApiHeld { id: number; label: string | null; cart: { items: CartItem[]; discount: number; total: number; heldAt: string } }
+const toHeld = (h: ApiHeld): HeldSale => ({ id: h.id, label: h.label ?? '', heldAt: h.cart.heldAt, items: h.cart.items, discount: h.cart.discount, total: h.cart.total });
+
 // ---- Calls ----
 export async function login(username: string, password: string): Promise<User> {
   const data = await request<{ token: string; user: ApiUser }>('/auth/login', { method: 'POST', body: { username, password } });
@@ -90,3 +94,16 @@ export async function createSale({ items, discount, method, received, reference 
   };
   return toSale(await request<ApiSale>('/sales', { method: 'POST', body }));
 }
+export const getShopName = async (): Promise<string> => (await request<{ shop_name: string }>('/settings/public')).shop_name;
+
+export const listHeldSales = async (): Promise<HeldSale[]> => (await request<ApiHeld[]>('/held-sales')).map(toHeld);
+
+export async function saveHeldSale(held: Omit<HeldSale, 'id'>): Promise<HeldSale> {
+  const created = await request<ApiHeld>('/held-sales', {
+    method: 'POST',
+    body: { label: held.label, cart: { items: held.items, discount: held.discount, total: held.total, heldAt: held.heldAt } },
+  });
+  return toHeld(created);
+}
+
+export const deleteHeldSale = (id: number) => request<void>(`/held-sales/${id}`, { method: 'DELETE' });

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { login } from '../api';
+import { getShopName, login } from '../api';
 import type { User } from '../types';
 
 interface LoginPageProps { onSignIn: (user: User) => void }
@@ -10,6 +10,8 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [shopName, setShopName] = useState('');
+  useEffect(() => { getShopName().then(setShopName).catch(() => {}); }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -20,7 +22,7 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
   };
 
   return <main className="login-page"><form className="login-card" onSubmit={submit}>
-    <h1>[SHOP NAME]</h1><p className="muted">Sign in to start your shift</p>
+    <h1>{shopName || 'POS'}</h1><p className="muted">Sign in to start your shift</p>
     <label>Username<input placeholder="alex" autoComplete="username" value={username} onChange={event => setUsername(event.target.value)} /></label>
     <label>Password or PIN<input placeholder="PIN" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} /></label>
     {error && <p role="alert" style={{ color: '#b42318', margin: 0 }}>{error}</p>}
