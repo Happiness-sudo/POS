@@ -1,21 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { CartItem, PaymentMethod, Product, Sale } from '../types';
-import { categoryMap, products as seedProducts } from '../data/products';
+import { categoryMap } from '../data/products';
+import { createSale, deleteHeldSale, listHeldSales, listProducts, listSales, saveHeldSale } from '../api';
 import TopBar from '../components/TopBar';
 import ProductPanel from '../components/ProductPanel';
 import CartPanel from '../components/CartPanel';
 import PaymentModal from '../components/PaymentModal';
 import DiscountModal from '../components/DiscountModal';
 import HeldSalesPage, { type HeldSale } from './HeldSalesPage';
-import SalesHistoryPage, { createSampleSales } from './SalesHistoryPage';
+import SalesHistoryPage from './SalesHistoryPage';
 import AdminPage from './AdminPage';
 
 interface SalePageProps { onLogout: () => void; onComplete: (sale: Sale) => void }
 
 export default function SalePage({ onLogout, onComplete }: SalePageProps) {
   const [search, setSearch] = useState('');
-  const [inventory, setInventory] = useState<Product[]>(() => { try { const saved = localStorage.getItem('pos-products'); return saved ? JSON.parse(saved) as Product[] : seedProducts; } catch { return seedProducts; } });
+  const [inventory, setInventory] = useState<Product[]>([]);
   const [category, setCategory] = useState('All');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
@@ -26,26 +27,27 @@ export default function SalePage({ onLogout, onComplete }: SalePageProps) {
   const [tendered, setTendered] = useState('');
   const [reference, setReference] = useState('');
   const [scanMode, setScanMode] = useState(false);
-  const [heldSales, setHeldSales] = useState<HeldSale[]>([
-    { id: -1, label: '[LABEL: Lady in red]', heldAt: '10:42', items: [{ productId: 1, name: 'Sample item', unitPrice: 160, quantity: 4 }], discount: 0, total: 640 },
-    { id: -2, label: '[LABEL]', heldAt: '11:05', items: [{ productId: 2, name: 'Sample item', unitPrice: 105, quantity: 2 }], discount: 0, total: 210 },
-  ]);
+  const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
   const [showHeldSales, setShowHeldSales] = useState(false);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
-  const [sales, setSales] = useState<Sale[]>(() => { try { const saved = localStorage.getItem('pos-sales-history'); return saved ? JSON.parse(saved) as Sale[] : createSampleSales(); } catch { return createSampleSales(); } });
+  const [sales, setSales] = useState<Sale[]>([]);
   const [toast, setToast] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const total = Math.max(0, subtotal - discount);
   const received = Number(tendered) || 0;
-  const change = Math.max(0, received - total);
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const filtered = useMemo(() => inventory.filter(product => product.active && (category === 'All' || product.categoryId === categoryMap[category]) && `${product.name} ${product.sku} ${product.barcode}`.toLowerCase().includes(search.toLowerCase())), [inventory, category, search]);
   const focusSearch = () => requestAnimationFrame(() => searchRef.current?.focus());
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2200); };
 
   useEffect(() => { focusSearch(); }, []);
+  const refreshInventory = () => { listProducts().then(setInventory).catch(error => notify(error instanceof Error ? error.message : 'Could not load products')); };
+  const refreshSales = () => { listSales().then(setSales).catch(error => notify(error instanceof Error ? error.message : 'Could not load sales history')); };
+  const refreshHeld = () => { listHeldSales().then(setHeldSales).catch(error => notify(error instanceof Error ? error.message : 'Could not load held sales')); };
+  useEffect(() => { refreshInventory(); refreshSales(); refreshHeld(); }, []);
+  const submittingRef = useRef(false);
   const addProduct = (product?: Product) => {
     if (!product) { notify('No matching product found'); focusSearch(); return; }
     if (product.stock <= 0) notify(`${product.name} is out of stock · sale allowed`);
@@ -55,21 +57,37 @@ export default function SalePage({ onLogout, onComplete }: SalePageProps) {
   const removeProduct = (id: number) => { setCart(current => current.filter(item => item.productId !== id)); setSelected(null); focusSearch(); };
   const changeQuantity = (id: number, delta: number) => { setCart(current => current.map(item => item.productId === id ? { ...item, quantity: item.quantity + delta } : item).filter(item => item.quantity > 0)); setSelected(id); focusSearch(); };
   const clearSale = () => { setCart([]); setDiscount(0); setSelected(null); setSearch(''); focusSearch(); };
-  const holdSale = () => { if (!cart.length) return; const now = new Date(); setHeldSales(current => [{ id: now.getTime(), label: '', heldAt: now.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false }), items: cart, discount, total }, ...current]); clearSale(); notify('Sale held'); };
-  const resumeHeldSale = (sale: HeldSale) => { setCart(sale.items); setDiscount(sale.discount); setHeldSales(current => current.filter(item => item.id !== sale.id)); setShowHeldSales(false); };
+  const holdSale = async () => {
+    if (!cart.length) return;
+    const now = new Date();
+    try {
+      const held = await saveHeldSale({ label: '', heldAt: now.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false }), items: cart, discount, total });
+      setHeldSales(current => [held, ...current]);
+      clearSale(); notify('Sale held');
+    } catch (error) { notify(error instanceof Error ? error.message : 'Could not hold the sale'); }
+  };
+  const resumeHeldSale = async (sale: HeldSale) => {
+    try { await deleteHeldSale(sale.id); } catch (error) { notify(error instanceof Error ? error.message : 'Could not resume the sale'); return; }
+    setCart(sale.items); setDiscount(sale.discount);
+    setHeldSales(current => current.filter(item => item.id !== sale.id));
+    setShowHeldSales(false);
+  };
   const startPayment = () => { if (!cart.length) return; setMethod('cash'); setTendered(String(total)); setReference(''); setPaymentOpen(true); };
-  const completePayment = () => {
+  const completePayment = async () => {
     if (method === 'cash' && received < total) { notify('Amount received is less than the total'); return; }
     if ((method === 'mpesa' || method === 'card') && !reference.trim()) { notify(method === 'mpesa' ? 'Enter the M-Pesa transaction code' : 'Enter the card slip number'); return; }
-    const now = new Date();
-    const id = now.getTime();
-    const sale: Sale = { id, shopId: 1, receiptNo: `R-${now.toISOString().slice(0, 10).replaceAll('-', '')}-${String(id).slice(-4)}`, cashierId: 1,
-      items: cart.map((item, index) => ({ id: index + 1, saleId: id, productId: item.productId, name: item.name, unitPrice: item.unitPrice, quantity: item.quantity, lineTotal: item.unitPrice * item.quantity })),
-      payments: [{ id: 1, saleId: id, method, amount: method === 'cash' ? received : total, ...(reference ? { reference } : {}) }], subtotal, discount, total,
-      amountTendered: method === 'cash' ? received : total, change: method === 'cash' ? change : 0, status: 'completed', createdAt: now.toISOString() };
-    setSales(current => { const updated = [sale, ...current]; try { localStorage.setItem('pos-sales-history', JSON.stringify(updated)); } catch { /* keep the current session history */ } return updated; });
-    setInventory(current => { const updated = current.map(product => { const line = cart.find(item => item.productId === product.id); return line ? { ...product, stock: Math.max(0, product.stock - line.quantity) } : product; }); try { localStorage.setItem('pos-products', JSON.stringify(updated)); } catch { /* keep the current session inventory */ } return updated; });
-    setPaymentOpen(false); setCart([]); setDiscount(0); onComplete(sale);
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      const sale = await createSale({ items: cart, discount, method, received, reference });
+      setSales(current => [sale, ...current]);
+      refreshInventory();
+      setPaymentOpen(false); setCart([]); setDiscount(0); onComplete(sale);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not complete the sale');
+    } finally {
+      submittingRef.current = false;
+    }
   };
   const handleSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Enter' || !search.trim()) return;
@@ -93,9 +111,9 @@ export default function SalePage({ onLogout, onComplete }: SalePageProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [paymentOpen, discountOpen, selected, cart, total, method, tendered, reference]);
 
-  if (showHeldSales) return <HeldSalesPage sales={heldSales} onBack={() => setShowHeldSales(false)} onLogout={onLogout} onResume={resumeHeldSale} onDelete={id => setHeldSales(current => current.filter(sale => sale.id !== id))}/>;
+  if (showHeldSales) return <HeldSalesPage sales={heldSales} onBack={() => setShowHeldSales(false)} onLogout={onLogout} onResume={resumeHeldSale} onDelete={id => { deleteHeldSale(id).then(() => setHeldSales(current => current.filter(sale => sale.id !== id))).catch(error => notify(error instanceof Error ? error.message : 'Could not delete the held sale')); }}/>;
   if (showSalesHistory) return <SalesHistoryPage sales={sales} onBack={() => setShowSalesHistory(false)} onLogout={onLogout}/>;
-  if (showAdmin) return <AdminPage onBack={() => { try { const saved = localStorage.getItem('pos-products'); if (saved) setInventory(JSON.parse(saved) as Product[]); } catch { /* retain the current inventory */ } setShowAdmin(false); }} onLogout={onLogout}/>;
+  if (showAdmin) return <AdminPage onBack={() => { refreshInventory(); setShowAdmin(false); }} onLogout={onLogout}/>;
   return <div className="app-shell"><TopBar heldCount={heldSales.length} onHeldSales={() => setShowHeldSales(true)} onSalesHistory={() => setShowSalesHistory(true)} onAdmin={() => setShowAdmin(true)} onLogout={onLogout}/><main className="sale-layout">
     <ProductPanel filtered={filtered} category={category} search={search} selected={selected} searchRef={searchRef} onCategory={value => { setCategory(value); focusSearch(); }} onSearch={setSearch} onSearchKey={handleSearchKey} onAdd={addProduct} onClearSearch={() => { setSearch(''); focusSearch(); setScanMode(false); }} onScanBarcode={() => { setScanMode(true); setSearch(''); focusSearch(); notify('Ready to scan barcode'); }}/>
     <CartPanel cart={cart} selected={selected} subtotal={subtotal} discount={discount} total={total} onSelect={setSelected} onQuantity={changeQuantity} onRemove={removeProduct} onDiscount={() => setDiscountOpen(true)} onHold={holdSale} onClear={clearSale} onPay={startPayment}/>

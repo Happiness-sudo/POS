@@ -88,7 +88,7 @@ def create_sale():
 
         tendered = change = None
         customer = (data.get("customer_name") or "").strip() or None
-        mpesa_code = (data.get("mpesa_code") or "").strip().upper() or None
+        mpesa_code = (data.get("reference") or data.get("mpesa_code") or "").strip().upper() or None
         if method == "cash":
             tendered = _int(data.get("amount_tendered", total), "amount_tendered")
             if tendered < total:

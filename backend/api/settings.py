@@ -8,6 +8,12 @@ bp = Blueprint("settings", __name__)
 ALLOWED = {"shop_name", "currency", "receipt_footer"}
 
 
+@bp.get("/public")
+def public_settings():
+    """Shop name for the login screen (no sign-in needed)."""
+    return jsonify(shop_name=_all().get("shop_name", ""))
+
+
 def _all():
     return {r["key"]: r["value"] for r in get_db().execute("SELECT key, value FROM settings")}
 
