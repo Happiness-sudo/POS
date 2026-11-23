@@ -1,2 +1,7 @@
 /node_modules
 .env
+
+backend/soko.db*
+backend/venv/
+backend/app.py.bak
+__pycache__/
